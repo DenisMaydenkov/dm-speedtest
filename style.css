@@ -39,7 +39,7 @@ svg{flex:none}
 
 /* the box: solid fill, the text inverts over it */
 .box{position:relative;flex:1;min-height:300px;border:1px solid var(--sep);border-radius:2px;overflow:hidden;isolation:isolate;background:var(--bg);--p:0}
-.fill{position:absolute;left:0;right:0;bottom:0;height:calc(var(--p) * 100%);background:var(--text);transition:height .3s linear,width .3s linear}
+.fill{position:absolute;left:0;right:0;bottom:0;height:calc(var(--p) * 100%);background:var(--text)}
 .box-in{position:absolute;inset:0;padding:20px;display:flex;flex-direction:column;justify-content:space-between;color:#fff;mix-blend-mode:difference}
 .box-top{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:12px;font-weight:500;letter-spacing:1px}
 .phase{display:flex;align-items:center;gap:8px}
@@ -56,9 +56,8 @@ svg{flex:none}
 .running .steps{display:grid}
 .steps > div{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:500;letter-spacing:1px;color:var(--hint)}
 .steps .bar{height:3px;background:var(--sep);overflow:hidden}
-.steps .bar i{display:block;height:100%;width:0;background:var(--text);transition:width .3s}
+.steps .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
 .steps .on{color:var(--text)}
-.steps .on .bar i{background:var(--accent)}
 
 /* figures and connection */
 .tiles{display:flex;flex-wrap:wrap;gap:8px}
@@ -83,6 +82,9 @@ svg{flex:none}
 .nodeb svg,.tg svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .running .nodeb{opacity:.35;pointer-events:none}
 .nodeb .long{display:none}
+.nodeb{padding:0 16px;gap:6px}
+.nodeb.icon-only{width:54px;padding:0;justify-content:center}
+.nodeb.icon-only .short{display:none}
 .tg{display:none}
 .share{flex:none;width:54px;height:54px;border-radius:999px;background:none;border:1px solid var(--accent);color:var(--accent);display:grid;place-items:center;padding:0}
 .share svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -115,8 +117,13 @@ svg{flex:none}
 .opt + .opt{border-top:1px solid var(--sep)}
 .opt small{display:block;color:var(--hint);font-size:13px;font-weight:400;margin-top:2px}
 .opt svg{margin-left:auto;width:18px;height:18px;fill:none;stroke:var(--accent);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
-.opt-h{padding:12px 14px 4px;font-size:12px;font-weight:500;letter-spacing:1px;color:var(--hint);border-top:1px solid var(--sep)}
-.opt-h + .opt{border-top:0}
+.node-list{display:flex;flex-direction:column;gap:10px}
+.node-list h3{margin:6px 0 0 4px;color:var(--hint)}
+.chips{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.chip{display:flex;align-items:center;gap:8px;height:44px;padding:0 14px;border:1px solid var(--sep);border-radius:999px;background:none;font-size:14px;font-weight:500;text-align:left;min-width:0}
+.chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip svg{margin-left:auto;width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.chip.on{border-color:var(--accent);color:var(--accent)}
 .note{margin:0;font-size:13px;color:var(--hint);line-height:1.45}
 .row-btns{display:flex;gap:8px}
 .ghost{height:54px;border-radius:27px;border:1px solid var(--sep);background:none;padding:0 22px;font-size:17px;font-weight:500}
@@ -148,7 +155,8 @@ svg{flex:none}
   .share{width:auto;height:48px;border-radius:24px;padding:0 20px;display:flex;align-items:center;gap:8px;font-size:15px;font-weight:500}
   .share svg{width:18px;height:18px}
   .share span{display:inline}
-  .nodeb{height:48px;border-radius:24px;padding:0 18px}
+  .nodeb,.nodeb.icon-only{width:auto;height:48px;border-radius:24px;padding:0 18px;gap:8px}
+  .chips{grid-template-columns:repeat(3,minmax(0,1fr))}
   .nodeb .long{display:inline}
   .nodeb .short{display:none}
   .tg{display:flex;align-items:center;gap:6px;height:40px;padding:0 14px;border-radius:999px;border:1px solid var(--sep);color:var(--text);text-decoration:none;font-size:14px;font-weight:500}

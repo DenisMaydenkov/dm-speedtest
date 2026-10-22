@@ -22,7 +22,7 @@ const I18N = {
     vpnYes: 'Похоже, включён', vpnNo: 'Не обнаружен', rtcOk: 'IP не виден', rtcOff: 'Отключён', rtcNa: 'Не проверяется без VPN',
     fixTitle: 'Как исправить',
     fixText: 'Включи защиту от утечки WebRTC в настройках VPN-клиента. Если её нет — запрети WebRTC в браузере или поставь расширение, которое его блокирует.',
-    connecting: 'Подключение', server: 'Сервер', auto: 'Авто',
+    connecting: 'Подключение', server: 'Сервер', auto: 'Авто', usa: 'США',
     nodeTitle: 'Сервер замера', nodeAuto: 'Ближайший', nodeAutoSub: 'Cloudflare, выбирается автоматически',
     mlabNote: 'Серверы M-Lab публикуют результат замера вместе с IP-адресом в открытом наборе данных.',
     mlabPolicy: 'Политика данных M-Lab', agree: 'Согласен', cancel: 'Отмена',
@@ -49,7 +49,7 @@ const I18N = {
     vpnYes: 'Looks on', vpnNo: 'Not detected', rtcOk: 'IP hidden', rtcOff: 'Disabled', rtcNa: 'Checked only with a VPN',
     fixTitle: 'How to fix it',
     fixText: 'Turn on WebRTC leak protection in your VPN app. If it has none, disable WebRTC in the browser or install an extension that blocks it.',
-    connecting: 'Connecting', server: 'Server', auto: 'Auto',
+    connecting: 'Connecting', server: 'Server', auto: 'Auto', usa: 'USA',
     nodeTitle: 'Test server', nodeAuto: 'Nearest', nodeAutoSub: 'Cloudflare, picked automatically',
     mlabNote: 'M-Lab servers publish the result together with your IP address in an open dataset.',
     mlabPolicy: 'M-Lab data policy', agree: 'I agree', cancel: 'Cancel',
@@ -114,7 +114,7 @@ let raf = 0;
 
 /* ---------- formatting ---------- */
 
-const fmt = mbps => (mbps >= 10 ? Math.round(mbps) : mbps >= 1 ? mbps.toFixed(1) : mbps.toFixed(2)).toString();
+const fmt = mbps => (mbps >= 10 ? Math.round(mbps) : mbps >= 1 ? mbps.toFixed(1) : mbps >= 0.01 ? mbps.toFixed(2) : 0).toString();
 const fmtMs = ms => (ms < 10 ? ms.toFixed(1) : Math.round(ms)).toString();
 const scaleFor = v => SCALES.find(s => s >= v * 1.05) || SCALES.at(-1);
 const regionName = cc => { try { return new Intl.DisplayNames([lang], { type: 'region' }).of(cc); } catch { return cc; } };
@@ -520,7 +520,9 @@ function renderNet() {
 function renderNode() {
   const short = document.createElement('span');
   short.className = 'short';
-  short.textContent = S.node === 'auto' ? t('auto') : S.node;
+  short.textContent = S.node === 'auto' ? '' : S.node;
+  $('nodeBtn').classList.toggle('icon-only', S.node === 'auto');
+  $('nodeBtn').setAttribute('aria-label', `${t('server')}: ${S.node === 'auto' ? t('nodeAuto') : regionName(S.node)}`);
   const long = document.createElement('span');
   long.className = 'long';
   long.textContent = `${t('server')}: ${S.node === 'auto' ? t('nodeAuto').toLowerCase() : regionName(S.node)}`;
@@ -597,12 +599,10 @@ const CHECK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l
 let pendingNode = null;
 
 function fillNodes() {
-  const list = $('nodeList');
-  list.replaceChildren();
-  const opt = (id, name, sub) => {
+  const button = (cls, id, name, sub) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'opt';
+    b.className = cls + (S.node === id ? ' on' : '');
     const label = document.createElement('span');
     label.textContent = name;
     if (sub) {
@@ -613,16 +613,19 @@ function fillNodes() {
     b.append(label);
     if (S.node === id) b.insertAdjacentHTML('beforeend', CHECK_SVG);
     b.addEventListener('click', () => pickNode(id));
-    list.append(b);
+    return b;
   };
-  opt('auto', t('nodeAuto'), t('nodeAutoSub'));
-  const head = document.createElement('div');
-  head.className = 'opt-h';
+  const auto = document.createElement('div');
+  auto.className = 'rows';
+  auto.append(button('opt', 'auto', t('nodeAuto'), t('nodeAutoSub')));
+  const head = document.createElement('h3');
   head.textContent = 'M-Lab';
-  list.append(head);
-  MLAB.map(cc => [cc, regionName(cc)])
+  const grid = document.createElement('div');
+  grid.className = 'chips';
+  MLAB.map(cc => [cc, cc === 'US' ? t('usa') : regionName(cc)])
     .sort((a, b) => a[1].localeCompare(b[1], lang))
-    .forEach(([cc, name]) => opt(cc, name));
+    .forEach(([cc, name]) => grid.append(button('chip', cc, name)));
+  $('nodeList').replaceChildren(auto, head, grid);
 }
 
 function showNodeStep(consent) {
