@@ -22,6 +22,12 @@ const I18N = {
     vpnYes: 'Похоже, включён', vpnNo: 'Не обнаружен', rtcOk: 'IP не виден', rtcOff: 'Отключён', rtcNa: 'Не проверяется без VPN',
     fixTitle: 'Как исправить',
     fixText: 'Включи защиту от утечки WebRTC в настройках VPN-клиента. Если её нет — запрети WebRTC в браузере или поставь расширение, которое его блокирует.',
+    connecting: 'Подключение', server: 'Сервер', auto: 'Авто',
+    nodeTitle: 'Сервер замера', nodeAuto: 'Ближайший', nodeAutoSub: 'Cloudflare, выбирается автоматически',
+    mlabNote: 'Серверы M-Lab публикуют результат замера вместе с IP-адресом в открытом наборе данных.',
+    mlabPolicy: 'Политика данных M-Lab', agree: 'Согласен', cancel: 'Отмена',
+    consent: 'Замер пойдёт до сервера M-Lab ({place}). M-Lab опубликует результат вместе с твоим IP-адресом в открытом наборе данных. Продолжить?',
+    footMlab: 'Замер идёт до сервера M-Lab ({place}). M-Lab публикует результат и IP.',
   },
   en: {
     start: 'Start test', stop: 'Stop', again: 'Run again', share: 'Share', ok: 'Got it',
@@ -43,6 +49,12 @@ const I18N = {
     vpnYes: 'Looks on', vpnNo: 'Not detected', rtcOk: 'IP hidden', rtcOff: 'Disabled', rtcNa: 'Checked only with a VPN',
     fixTitle: 'How to fix it',
     fixText: 'Turn on WebRTC leak protection in your VPN app. If it has none, disable WebRTC in the browser or install an extension that blocks it.',
+    connecting: 'Connecting', server: 'Server', auto: 'Auto',
+    nodeTitle: 'Test server', nodeAuto: 'Nearest', nodeAutoSub: 'Cloudflare, picked automatically',
+    mlabNote: 'M-Lab servers publish the result together with your IP address in an open dataset.',
+    mlabPolicy: 'M-Lab data policy', agree: 'I agree', cancel: 'Cancel',
+    consent: 'The test will run to an M-Lab server ({place}). M-Lab will publish the result together with your IP address in an open dataset. Continue?',
+    footMlab: 'Measured to the M-Lab server ({place}). M-Lab publishes the result and IP.',
   },
 };
 
@@ -71,7 +83,11 @@ const MEASUREMENTS = [
   { type: 'upload', bytes: 5e7, count: 3 },
 ];
 const DL_FROM = 3, UL_FROM = 9;
+const BOUNDS = { latency: [0, DL_FROM], download: [DL_FROM, UL_FROM], upload: [UL_FROM, MEASUREMENTS.length] };
 const SCALES = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
+// Countries where M-Lab's locate service has ndt7 servers.
+const MLAB = ['NL', 'DE', 'FI', 'SE', 'PL', 'GB', 'FR', 'IT', 'ES', 'US', 'JP', 'SG'];
+const NDT_SECONDS = 10;
 
 const $ = id => document.getElementById(id);
 const root = document.documentElement;
@@ -86,7 +102,8 @@ let lang = root.lang === 'en' ? 'en' : 'ru';
 const t = k => I18N[lang][k] ?? k;
 
 const S = {
-  phase: 'idle', step: 0,
+  phase: 'idle', frac: 0, kind: 'cf',
+  node: MLAB.includes(store.get('node')) ? store.get('node') : 'auto', server: null,
   ping: null, jitter: null, dl: null, ul: null,
   target: 0, shown: 0, scale: 0,
   net: null, netFailed: false, rtc: null,
@@ -100,6 +117,8 @@ let raf = 0;
 const fmt = mbps => (mbps >= 10 ? Math.round(mbps) : mbps >= 1 ? mbps.toFixed(1) : mbps.toFixed(2)).toString();
 const fmtMs = ms => (ms < 10 ? ms.toFixed(1) : Math.round(ms)).toString();
 const scaleFor = v => SCALES.find(s => s >= v * 1.05) || SCALES.at(-1);
+const regionName = cc => { try { return new Intl.DisplayNames([lang], { type: 'region' }).of(cc); } catch { return cc; } };
+const serverPlace = () => S.server?.city || regionName(S.node);
 
 /* ---------- theme ---------- */
 
@@ -145,6 +164,7 @@ $('langBtn').addEventListener('click', () => {
   applyLang();
   loadNet();
   if ($('sheet').open) fillSheet();
+  if ($('nodeSheet').open) fillNodes();
 });
 
 /* ---------- network: who sees us, and is it a VPN ---------- */
@@ -232,7 +252,14 @@ const phaseOf = step => (step < DL_FROM ? 'latency' : step < UL_FROM ? 'download
 
 function start() {
   engine?.pause();
-  Object.assign(S, { phase: 'latency', step: 0, ping: null, jitter: null, dl: null, ul: null, target: 0, shown: 0, scale: 0, card: null });
+  Object.assign(S, { phase: 'latency', frac: 0, ping: null, jitter: null, dl: null, ul: null, target: 0, shown: 0, scale: 0, card: null });
+  if (S.node === 'auto') startCloudflare(); else startMlab(S.node);
+  render();
+  tick();
+}
+
+function startCloudflare() {
+  S.kind = 'cf';
   const e = new SpeedTest({
     autoStart: false,
     measurements: MEASUREMENTS,
@@ -246,7 +273,8 @@ function start() {
     const next = phaseOf(measurementId);
     if (next !== S.phase) Object.assign(S, { target: 0, shown: 0, scale: 0 });
     S.phase = next;
-    S.step = measurementId;
+    const [a, b] = BOUNDS[next];
+    S.frac = Math.min(1, (measurementId - a + 0.5) / (b - a));
     render();
   };
   e.onResultsChange = () => {
@@ -286,8 +314,97 @@ function start() {
     render();
   };
   e.play();
+}
+
+// Runs one ndt7 phase in M-Lab's worker; resolves true if the phase completed.
+function ndtPhase(run, kind, urls, onData) {
+  return new Promise(resolve => {
+    const w = new Worker(`vendor/ndt7/ndt7-${kind}-worker.js`);
+    run.workers.push(w);
+    let timer;
+    const finish = ok => { clearTimeout(timer); w.terminate(); resolve(ok); };
+    timer = setTimeout(() => finish(false), 10000);
+    w.onerror = () => finish(false);
+    w.onmessage = ({ data }) => {
+      if (run.stopped || !data?.MsgType || data.MsgType === 'error') return finish(false);
+      if (data.MsgType === 'start') {
+        clearTimeout(timer);
+        timer = setTimeout(() => finish(true), (NDT_SECONDS + 3) * 1000);
+      } else if (data.MsgType === 'measurement') {
+        onData(data.Source === 'server' ? { server: JSON.parse(data.ServerMessage) } : { client: data.ClientData });
+      } else if (data.MsgType === 'complete') {
+        finish(true);
+      }
+    };
+    w.postMessage(urls);
+  });
+}
+
+async function startMlab(cc) {
+  S.kind = 'mlab';
+  S.server = null;
+  const run = { workers: [], stopped: false, pause() { this.stopped = true; this.workers.forEach(w => w.terminate()); } };
+  engine = run;
+  const fail = msg => {
+    if (engine !== run) return;
+    console.warn('ndt7:', msg);
+    run.pause();
+    engine = null;
+    S.phase = 'error';
+    toast(t('errorToast'));
+    render();
+  };
+
+  let urls;
+  try {
+    const res = await fetch(`https://locate.measurementlab.net/v2/nearest/ndt/ndt7?country=${cc}&client_name=dm-speedtest`).then(r => r.json());
+    const pick = (res.results || []).find(x => x.location?.country === cc) || res.results?.[0];
+    if (!pick) throw new Error('no server');
+    S.server = { city: pick.location?.city, cc: pick.location?.country };
+    urls = { '///ndt/v7/download': pick.urls['wss:///ndt/v7/download'], '///ndt/v7/upload': pick.urls['wss:///ndt/v7/upload'] };
+  } catch (err) {
+    return fail(err.message);
+  }
+  if (engine !== run) return;
+
+  // Ping and jitter come from the server's TCP stats while it streams the download.
+  Object.assign(S, { phase: 'download', frac: 0, target: 0, shown: 0, scale: 0 });
   render();
-  tick();
+  const okDown = await ndtPhase(run, 'download', urls, ({ client, server }) => {
+    if (client) {
+      S.target = client.MeanClientMbps;
+      S.frac = Math.min(1, client.ElapsedTime / NDT_SECONDS);
+    }
+    if (server?.TCPInfo) {
+      S.ping = server.TCPInfo.MinRTT / 1000;
+      S.jitter = server.TCPInfo.RTTVar / 1000;
+    }
+  });
+  if (engine !== run) return;
+  if (!okDown || !S.target) return fail('download failed');
+  S.dl = S.target;
+
+  Object.assign(S, { phase: 'upload', frac: 0, target: 0, shown: 0, scale: 0 });
+  render();
+  let serverUp = 0;
+  const okUp = await ndtPhase(run, 'upload', urls, ({ client, server }) => {
+    const tcp = server?.TCPInfo;
+    if (tcp?.ElapsedTime) {
+      serverUp = tcp.BytesReceived * 8 / tcp.ElapsedTime;
+      S.target = serverUp;
+      S.frac = Math.min(1, tcp.ElapsedTime / 1e6 / NDT_SECONDS);
+    } else if (client && !serverUp) {
+      S.target = client.MeanClientMbps;
+      S.frac = Math.min(1, client.ElapsedTime / NDT_SECONDS);
+    }
+  });
+  if (engine !== run) return;
+  if (!okUp || !S.target) return fail('upload failed');
+
+  Object.assign(S, { phase: 'done', ul: S.target });
+  engine = null;
+  render();
+  prepareCard();
 }
 
 function stop() {
@@ -329,7 +446,7 @@ function renderBox() {
       right = t('approx');
       break;
     case 'latency':
-      label = t('ping');
+      label = S.kind === 'mlab' ? t('connecting') : t('ping');
       setBig(S.shown > 0 ? fmtMs(S.shown) : '—', t('ms'));
       break;
     case 'download':
@@ -372,13 +489,10 @@ function setTile(id, value, unit) {
 
 function renderSteps() {
   const order = ['latency', 'download', 'upload'];
-  const bounds = { latency: [0, DL_FROM], download: [DL_FROM, UL_FROM], upload: [UL_FROM, MEASUREMENTS.length] };
   const cur = order.indexOf(S.phase);
   document.querySelectorAll('#steps > div').forEach(div => {
-    const name = div.dataset.step;
-    const i = order.indexOf(name);
-    const [a, b] = bounds[name];
-    const frac = S.phase === 'done' || i < cur ? 1 : i > cur ? 0 : Math.min(1, (S.step - a + 0.5) / (b - a));
+    const i = order.indexOf(div.dataset.step);
+    const frac = S.phase === 'done' || i < cur ? 1 : i > cur ? 0 : S.frac;
     div.classList.toggle('on', i === cur);
     div.querySelector('i').style.width = (frac * 100).toFixed(1) + '%';
   });
@@ -396,11 +510,22 @@ function renderNet() {
     $('connSub').textContent = '';
   } else {
     const place = [n.country, n.city].filter(Boolean).join(', ');
-    const node = n.colo ? `${t('node')} ${n.colo}` : '';
+    const node = S.node !== 'auto' ? `M-Lab ${serverPlace()}` : n.colo ? `${t('node')} ${n.colo}` : '';
     $('connMain').textContent = n.vpn ? place : [n.org, n.city].filter(Boolean).join(' · ');
     $('connSub').textContent = [n.ip, n.vpn ? n.org : (n.asn ? 'AS' + n.asn : ''), node].filter(Boolean).join(' · ');
   }
-  $('warn').hidden = !(n && n.cc === 'RU' && !n.vpn);
+  $('warn').hidden = !(n && n.cc === 'RU' && !n.vpn && S.node === 'auto');
+}
+
+function renderNode() {
+  const short = document.createElement('span');
+  short.className = 'short';
+  short.textContent = S.node === 'auto' ? t('auto') : S.node;
+  const long = document.createElement('span');
+  long.className = 'long';
+  long.textContent = `${t('server')}: ${S.node === 'auto' ? t('nodeAuto').toLowerCase() : regionName(S.node)}`;
+  $('nodeText').replaceChildren(short, long);
+  $('foot').textContent = S.node === 'auto' ? t('foot') : t('footMlab').replace('{place}', serverPlace());
 }
 
 function render() {
@@ -416,6 +541,7 @@ function render() {
   setTile('vPing', S.ping != null ? fmtMs(S.ping) : null, t('ms'));
   setTile('vJit', S.jitter != null ? fmtMs(S.jitter) : null, t('ms'));
   renderNet();
+  renderNode();
 }
 
 /* ---------- details sheet ---------- */
@@ -445,7 +571,8 @@ function fillSheet() {
     add(t('rIp'), n.ip);
     add(t('rPlace'), [n.country, n.city].filter(Boolean).join(', ') || '—');
     add(t('rIsp'), [n.asn ? 'AS' + n.asn : '', n.org].filter(Boolean).join(' ') || '—');
-    if (n.colo) add(t('rNode'), 'Cloudflare ' + n.colo);
+    if (S.node !== 'auto') add(t('rNode'), `M-Lab · ${serverPlace()}`);
+    else if (n.colo) add(t('rNode'), 'Cloudflare ' + n.colo);
     add(t('rVpn'), n.vpn ? t('vpnYes') : t('vpnNo'), n.vpn ? 'ok' : '');
     if (!n.vpn) add(t('rRtc'), t('rtcNa'));
     else if (v === 'leak') add(t('rRtc'), leakedIps().join(', '), 'bad');
@@ -463,6 +590,73 @@ $('vpnPill').addEventListener('click', openSheet);
 $('connBtn').addEventListener('click', openSheet);
 $('sClose').addEventListener('click', () => $('sheet').close());
 $('sheet').addEventListener('click', e => { if (e.target === $('sheet')) $('sheet').close(); });
+
+/* ---------- test server picker ---------- */
+
+const CHECK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+let pendingNode = null;
+
+function fillNodes() {
+  const list = $('nodeList');
+  list.replaceChildren();
+  const opt = (id, name, sub) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'opt';
+    const label = document.createElement('span');
+    label.textContent = name;
+    if (sub) {
+      const small = document.createElement('small');
+      small.textContent = sub;
+      label.append(small);
+    }
+    b.append(label);
+    if (S.node === id) b.insertAdjacentHTML('beforeend', CHECK_SVG);
+    b.addEventListener('click', () => pickNode(id));
+    list.append(b);
+  };
+  opt('auto', t('nodeAuto'), t('nodeAutoSub'));
+  const head = document.createElement('div');
+  head.className = 'opt-h';
+  head.textContent = 'M-Lab';
+  list.append(head);
+  MLAB.map(cc => [cc, regionName(cc)])
+    .sort((a, b) => a[1].localeCompare(b[1], lang))
+    .forEach(([cc, name]) => opt(cc, name));
+}
+
+function showNodeStep(consent) {
+  $('nodePick').hidden = consent;
+  $('nodeConsent').hidden = !consent;
+}
+
+function setNode(id) {
+  S.node = id;
+  S.server = null;
+  store.set('node', id);
+  $('nodeSheet').close();
+  stop();
+}
+
+function pickNode(id) {
+  if (id !== 'auto' && store.get('mlabConsent') !== '1') {
+    pendingNode = id;
+    $('consentText').textContent = t('consent').replace('{place}', regionName(id));
+    showNodeStep(true);
+    return;
+  }
+  setNode(id);
+}
+
+$('nodeBtn').addEventListener('click', () => {
+  if (engine) return;
+  fillNodes();
+  showNodeStep(false);
+  $('nodeSheet').showModal();
+});
+$('consentYes').addEventListener('click', () => { store.set('mlabConsent', '1'); setNode(pendingNode); });
+$('consentNo').addEventListener('click', () => showNodeStep(false));
+$('nodeSheet').addEventListener('click', e => { if (e.target === $('nodeSheet')) $('nodeSheet').close(); });
 
 /* ---------- share ---------- */
 

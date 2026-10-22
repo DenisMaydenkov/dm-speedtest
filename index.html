@@ -31,6 +31,7 @@
   <header class="top">
     <svg class="mark" viewBox="0 0 143 143" fill="currentColor" aria-hidden="true"><path d="M142.337 142.337H71.1687C110.474 142.337 142.337 110.474 142.337 71.1687C142.337 31.8632 110.474 0 71.1687 0C31.8634 0.000330547 0.000330526 31.8634 0 71.1687C0 110.474 31.8632 142.337 71.1687 142.337H0V0H142.337V142.337Z"/><path d="M19.6957 101.275H38.5147V120.094H19.6957V101.275Z"/><path d="M76.1477 48.585H94.9654V120.092H76.1477V48.585Z"/><path d="M104.378 22.2408H123.196V120.093H104.378V22.2408Z"/><path d="M47.9213 74.9306H66.739V120.093H47.9213V74.9306Z"/></svg>
     <div class="brand"><b>Speed test</b><small>by dmworks</small></div>
+    <a class="tg" href="https://t.me/dmworks" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.5 4.5 2.5 11.8l6.2 2.1 2.3 6.6 3.4-4.1 5.3 4z"/><path d="m8.7 13.9 8.8-6.4-6.5 8.9"/></svg><span>Telegram</span></a>
     <button class="pill wait" id="vpnPill" type="button"><span id="vpnText">…</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
     <button class="ib txt" id="langBtn" type="button">EN</button>
     <button class="ib" id="themeBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true" id="themeIcon"></svg></button>
@@ -64,8 +65,9 @@
 
   <div class="actions">
     <button class="main" id="goBtn" type="button"></button>
+    <button class="nodeb" id="nodeBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/></svg><span id="nodeText"></span></button>
     <button class="share" id="shareBtn" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg><span data-t="share"></span></button>
-    <p class="foot" data-t="foot"></p>
+    <p class="foot" id="foot"></p>
   </div>
 </main>
 
@@ -76,6 +78,20 @@
   <div class="rows" id="sRows"></div>
   <div class="fix" id="sFix" hidden><h3 data-t="fixTitle"></h3><p data-t="fixText"></p></div>
   <button class="main" id="sClose" type="button" data-t="ok"></button>
+</dialog>
+
+<dialog class="sheet" id="nodeSheet">
+  <div class="grab"></div>
+  <h2 data-t="nodeTitle"></h2>
+  <div id="nodePick">
+    <div class="rows opts" id="nodeList"></div>
+    <p class="note"><span data-t="mlabNote"></span> <a href="https://www.measurementlab.net/privacy/" target="_blank" rel="noopener" data-t="mlabPolicy"></a></p>
+  </div>
+  <div id="nodeConsent" hidden>
+    <p class="lead" id="consentText"></p>
+    <p class="note"><a href="https://www.measurementlab.net/privacy/" target="_blank" rel="noopener" data-t="mlabPolicy"></a></p>
+    <div class="row-btns"><button class="main" id="consentYes" type="button" data-t="agree"></button><button class="ghost" id="consentNo" type="button" data-t="cancel"></button></div>
+  </div>
 </dialog>
 
 <div class="toast" id="toast" role="status"></div>

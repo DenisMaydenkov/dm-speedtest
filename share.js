@@ -9,8 +9,8 @@ const LOGO = [
 ];
 
 const COLORS = {
-  dark: { bg: '#000', block: '#161616', text: '#f2f2f2', hint: '#8a8a8a', sep: '#2a2a2a', ok: '#3dd68c', bad: '#ff6369' },
-  light: { bg: '#f2f2f2', block: '#e6e6e6', text: '#000', hint: '#5f5f5f', sep: '#d0d0d0', ok: '#137a46', bad: '#c62a2f' },
+  dark: { bg: '#000', text: '#f2f2f2', hint: '#8a8a8a', sep: '#2a2a2a', ok: '#3dd68c', bad: '#ff6369' },
+  light: { bg: '#f2f2f2', text: '#000', hint: '#5f5f5f', sep: '#d0d0d0', ok: '#137a46', bad: '#c62a2f' },
 };
 
 const FONT = '"Instrument Sans", -apple-system, "Helvetica Neue", Arial, sans-serif';
@@ -80,7 +80,7 @@ export async function drawCard(d) {
 
   // the box, with its text inverted where the fill covers it
   const bx = PAD, by = 152, bw = SIZE - 2 * PAD, bh = 616;
-  x.fillStyle = c.block;
+  x.fillStyle = c.bg;
   x.fillRect(bx, by, bw, bh);
   const fh = Math.round(bh * Math.max(0, Math.min(1, d.fill)));
   x.fillStyle = c.text;
