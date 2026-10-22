@@ -118,7 +118,11 @@ svg{flex:none}
 .opt small{display:block;color:var(--hint);font-size:13px;font-weight:400;margin-top:2px}
 .opt svg{margin-left:auto;width:18px;height:18px;fill:none;stroke:var(--accent);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
 .node-list{display:flex;flex-direction:column;gap:10px}
-.node-list h3{margin:6px 0 0 4px;color:var(--hint)}
+.opt-split{display:flex;align-items:stretch;border-top:1px solid var(--sep)}
+.opt-split .opt{flex:1;min-width:0}
+.opt-arrow{flex:none;width:56px;border:0;border-left:1px solid var(--sep);background:none;display:grid;place-items:center;padding:0}
+.opt-arrow svg{width:18px;height:18px;fill:none;stroke:var(--hint);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transition:transform .2s}
+.opt-arrow[aria-expanded="true"] svg{transform:rotate(180deg)}
 .chips{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .chip{display:flex;align-items:center;gap:8px;height:44px;padding:0 14px;border:1px solid var(--sep);border-radius:999px;background:none;font-size:14px;font-weight:500;text-align:left;min-width:0}
 .chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

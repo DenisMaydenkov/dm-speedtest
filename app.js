@@ -22,8 +22,13 @@ const I18N = {
     vpnYes: 'Похоже, включён', vpnNo: 'Не обнаружен', rtcOk: 'IP не виден', rtcOff: 'Отключён', rtcNa: 'Не проверяется без VPN',
     fixTitle: 'Как исправить',
     fixText: 'Включи защиту от утечки WebRTC в настройках VPN-клиента. Если её нет — запрети WebRTC в браузере или поставь расширение, которое его блокирует.',
-    connecting: 'Подключение', server: 'Сервер', auto: 'Авто', usa: 'США',
-    nodeTitle: 'Сервер замера', nodeAuto: 'Ближайший', nodeAutoSub: 'Cloudflare, выбирается автоматически',
+    connecting: 'Подключение', server: 'Сервер', usa: 'США', nearest: 'ближайший',
+    nodeTitle: 'Сервер замера',
+    modeAuto: 'Авто', modeAutoSub: 'Наш сервер, если ты на VPN DMWorks, иначе Cloudflare',
+    modeCfSub: 'Ближайший узел Cloudflare', modeMy: 'DMWorks NL', modeMySub: 'Наш сервер в Амстердаме',
+    modeMlabSub: 'Ближайший сервер M-Lab', mlabCountries: 'Выбрать страну M-Lab', nodeMy: 'сервер DMWorks NL',
+    footMy: 'Замер идёт до сервера DMWorks в Нидерландах. Не храним IP и результаты.',
+    warnMyVpn: 'Ты подключён к VPN DMWorks, поэтому замер идёт до этого же сервера: он показывает скорость между тобой и VPN. Чтобы проверить интернет за VPN, выбери Cloudflare или M-Lab.',
     mlabNote: 'Серверы M-Lab публикуют результат замера вместе с IP-адресом в открытом наборе данных.',
     mlabPolicy: 'Политика данных M-Lab', agree: 'Согласен', cancel: 'Отмена',
     consent: 'Замер пойдёт до сервера M-Lab ({place}). M-Lab опубликует результат вместе с твоим IP-адресом в открытом наборе данных. Продолжить?',
@@ -49,8 +54,13 @@ const I18N = {
     vpnYes: 'Looks on', vpnNo: 'Not detected', rtcOk: 'IP hidden', rtcOff: 'Disabled', rtcNa: 'Checked only with a VPN',
     fixTitle: 'How to fix it',
     fixText: 'Turn on WebRTC leak protection in your VPN app. If it has none, disable WebRTC in the browser or install an extension that blocks it.',
-    connecting: 'Connecting', server: 'Server', auto: 'Auto', usa: 'USA',
-    nodeTitle: 'Test server', nodeAuto: 'Nearest', nodeAutoSub: 'Cloudflare, picked automatically',
+    connecting: 'Connecting', server: 'Server', usa: 'USA', nearest: 'nearest',
+    nodeTitle: 'Test server',
+    modeAuto: 'Auto', modeAutoSub: 'Our server if you’re on DMWorks VPN, otherwise Cloudflare',
+    modeCfSub: 'Nearest Cloudflare node', modeMy: 'DMWorks NL', modeMySub: 'Our server in Amsterdam',
+    modeMlabSub: 'Nearest M-Lab server', mlabCountries: 'Choose an M-Lab country', nodeMy: 'DMWorks NL server',
+    footMy: 'Measured to the DMWorks server in the Netherlands. We don’t store your IP or results.',
+    warnMyVpn: 'You’re connected to DMWorks VPN, so the test runs to that same server: it shows the speed between you and the VPN. To test the internet behind the VPN, pick Cloudflare or M-Lab.',
     mlabNote: 'M-Lab servers publish the result together with your IP address in an open dataset.',
     mlabPolicy: 'M-Lab data policy', agree: 'I agree', cancel: 'Cancel',
     consent: 'The test will run to an M-Lab server ({place}). M-Lab will publish the result together with your IP address in an open dataset. Continue?',
@@ -87,6 +97,11 @@ const BOUNDS = { latency: [0, DL_FROM], download: [DL_FROM, UL_FROM], upload: [U
 const SCALES = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
 // Countries where M-Lab's locate service has ndt7 servers.
 const MLAB = ['NL', 'DE', 'FI', 'SE', 'PL', 'GB', 'FR', 'IT', 'ES', 'US', 'JP', 'SG'];
+// The DMWorks VPN exits from this address; its server also hosts the speed test endpoints.
+const MY_IPS = ['87.199.202.19'];
+const MY_SPEED = 'https://dmworks.duckdns.org/speed';
+const NODES = ['auto', 'cf', 'my', 'mlab', ...MLAB.map(cc => 'mlab:' + cc)];
+const savedNode = (() => { try { return localStorage.getItem('node'); } catch { return null; } })();
 const NDT_SECONDS = 10;
 
 const $ = id => document.getElementById(id);
@@ -103,7 +118,8 @@ const t = k => I18N[lang][k] ?? k;
 
 const S = {
   phase: 'idle', frac: 0, kind: 'cf',
-  node: MLAB.includes(store.get('node')) ? store.get('node') : 'auto', server: null,
+  node: NODES.includes(savedNode) ? savedNode : MLAB.includes(savedNode) ? 'mlab:' + savedNode : 'auto',
+  mode: 'cf', server: null,
   ping: null, jitter: null, dl: null, ul: null,
   target: 0, shown: 0, scale: 0,
   net: null, netFailed: false, rtc: null,
@@ -118,7 +134,22 @@ const fmt = mbps => (mbps >= 10 ? Math.round(mbps) : mbps >= 1 ? mbps.toFixed(1)
 const fmtMs = ms => (ms < 10 ? ms.toFixed(1) : Math.round(ms)).toString();
 const scaleFor = v => SCALES.find(s => s >= v * 1.05) || SCALES.at(-1);
 const regionName = cc => { try { return new Intl.DisplayNames([lang], { type: 'region' }).of(cc); } catch { return cc; } };
-const serverPlace = () => S.server?.city || regionName(S.node);
+const countryName = cc => (cc === 'US' ? t('usa') : regionName(cc));
+const mlabCc = node => (node.startsWith('mlab:') ? node.slice(5) : null);
+const onMyVpn = () => MY_IPS.includes(S.net?.ip);
+// What a choice actually measures against; "auto" resolves once we know whose VPN the visitor is on.
+const modeOf = node => (node === 'auto' ? (onMyVpn() ? 'my' : 'cf') : node.startsWith('mlab') ? 'mlab' : node);
+const curMode = () => (S.phase === 'idle' ? modeOf(S.node) : S.mode);
+const serverPlace = () => S.server?.city || (mlabCc(S.node) ? countryName(mlabCc(S.node)) : t('nearest'));
+const nodeName = node => node === 'auto' ? t('modeAuto') : node === 'cf' ? 'Cloudflare' : node === 'my' ? t('modeMy')
+  : mlabCc(node) ? `M-Lab, ${countryName(mlabCc(node))}` : 'M-Lab';
+
+function nodeLabel() {
+  const m = curMode();
+  if (m === 'my') return t('nodeMy');
+  if (m === 'mlab') return `M-Lab ${serverPlace()}`;
+  return S.net?.colo ? `${t('node')} ${S.net.colo}` : 'Cloudflare';
+}
 
 /* ---------- theme ---------- */
 
@@ -253,14 +284,18 @@ const phaseOf = step => (step < DL_FROM ? 'latency' : step < UL_FROM ? 'download
 function start() {
   engine?.pause();
   Object.assign(S, { phase: 'latency', frac: 0, ping: null, jitter: null, dl: null, ul: null, target: 0, shown: 0, scale: 0, card: null });
-  if (S.node === 'auto') startCloudflare(); else startMlab(S.node);
+  S.mode = modeOf(S.node);
+  if (S.mode === 'mlab') startMlab(mlabCc(S.node));
+  else startCloudflare(S.mode === 'my' ? { downloadApiUrl: `${MY_SPEED}/__down`, uploadApiUrl: `${MY_SPEED}/__up` } : {});
   render();
   tick();
 }
 
-function startCloudflare() {
+// The Cloudflare engine also drives our own server, which speaks the same __down/__up protocol.
+function startCloudflare(urls) {
   S.kind = 'cf';
   const e = new SpeedTest({
+    ...urls,
     autoStart: false,
     measurements: MEASUREMENTS,
     logAimApiUrl: null,
@@ -357,8 +392,9 @@ async function startMlab(cc) {
 
   let urls;
   try {
-    const res = await fetch(`https://locate.measurementlab.net/v2/nearest/ndt/ndt7?country=${cc}&client_name=dm-speedtest`).then(r => r.json());
-    const pick = (res.results || []).find(x => x.location?.country === cc) || res.results?.[0];
+    const q = cc ? `&country=${cc}` : '';
+    const res = await fetch(`https://locate.measurementlab.net/v2/nearest/ndt/ndt7?client_name=dm-speedtest${q}`).then(r => r.json());
+    const pick = (cc && (res.results || []).find(x => x.location?.country === cc)) || res.results?.[0];
     if (!pick) throw new Error('no server');
     S.server = { city: pick.location?.city, cc: pick.location?.country };
     urls = { '///ndt/v7/download': pick.urls['wss:///ndt/v7/download'], '///ndt/v7/upload': pick.urls['wss:///ndt/v7/upload'] };
@@ -510,24 +546,28 @@ function renderNet() {
     $('connSub').textContent = '';
   } else {
     const place = [n.country, n.city].filter(Boolean).join(', ');
-    const node = S.node !== 'auto' ? `M-Lab ${serverPlace()}` : n.colo ? `${t('node')} ${n.colo}` : '';
     $('connMain').textContent = n.vpn ? place : [n.org, n.city].filter(Boolean).join(' · ');
-    $('connSub').textContent = [n.ip, n.vpn ? n.org : (n.asn ? 'AS' + n.asn : ''), node].filter(Boolean).join(' · ');
+    $('connSub').textContent = [n.ip, n.vpn ? n.org : (n.asn ? 'AS' + n.asn : ''), nodeLabel()].filter(Boolean).join(' · ');
   }
-  $('warn').hidden = !(n && n.cc === 'RU' && !n.vpn && S.node === 'auto');
+  const m = curMode();
+  const warn = m === 'my' && onMyVpn() ? t('warnMyVpn')
+    : n && n.cc === 'RU' && !n.vpn && m === 'cf' ? t('warnRu') : '';
+  $('warnText').textContent = warn;
+  $('warn').hidden = !warn;
 }
 
 function renderNode() {
   const short = document.createElement('span');
   short.className = 'short';
-  short.textContent = S.node === 'auto' ? '' : S.node;
-  $('nodeBtn').classList.toggle('icon-only', S.node === 'auto');
-  $('nodeBtn').setAttribute('aria-label', `${t('server')}: ${S.node === 'auto' ? t('nodeAuto') : regionName(S.node)}`);
+  short.textContent = mlabCc(S.node) || { auto: '', cf: 'CF', my: 'NL', mlab: 'M-Lab' }[S.node];
   const long = document.createElement('span');
   long.className = 'long';
-  long.textContent = `${t('server')}: ${S.node === 'auto' ? t('nodeAuto').toLowerCase() : regionName(S.node)}`;
+  long.textContent = `${t('server')}: ${nodeName(S.node)}`;
   $('nodeText').replaceChildren(short, long);
-  $('foot').textContent = S.node === 'auto' ? t('foot') : t('footMlab').replace('{place}', serverPlace());
+  $('nodeBtn').classList.toggle('icon-only', S.node === 'auto');
+  $('nodeBtn').setAttribute('aria-label', long.textContent);
+  const m = curMode();
+  $('foot').textContent = m === 'my' ? t('footMy') : m === 'mlab' ? t('footMlab').replace('{place}', serverPlace()) : t('foot');
 }
 
 function render() {
@@ -573,8 +613,8 @@ function fillSheet() {
     add(t('rIp'), n.ip);
     add(t('rPlace'), [n.country, n.city].filter(Boolean).join(', ') || '—');
     add(t('rIsp'), [n.asn ? 'AS' + n.asn : '', n.org].filter(Boolean).join(' ') || '—');
-    if (S.node !== 'auto') add(t('rNode'), `M-Lab · ${serverPlace()}`);
-    else if (n.colo) add(t('rNode'), 'Cloudflare ' + n.colo);
+    const nl = nodeLabel();
+    add(t('rNode'), nl[0].toUpperCase() + nl.slice(1));
     add(t('rVpn'), n.vpn ? t('vpnYes') : t('vpnNo'), n.vpn ? 'ok' : '');
     if (!n.vpn) add(t('rRtc'), t('rtcNa'));
     else if (v === 'leak') add(t('rRtc'), leakedIps().join(', '), 'bad');
@@ -596,7 +636,9 @@ $('sheet').addEventListener('click', e => { if (e.target === $('sheet')) $('shee
 /* ---------- test server picker ---------- */
 
 const CHECK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+const CHEVRON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
 let pendingNode = null;
+let mlabOpen = false;
 
 function fillNodes() {
   const button = (cls, id, name, sub) => {
@@ -615,17 +657,38 @@ function fillNodes() {
     b.addEventListener('click', () => pickNode(id));
     return b;
   };
-  const auto = document.createElement('div');
-  auto.className = 'rows';
-  auto.append(button('opt', 'auto', t('nodeAuto'), t('nodeAutoSub')));
-  const head = document.createElement('h3');
-  head.textContent = 'M-Lab';
+  const rows = document.createElement('div');
+  rows.className = 'rows';
+  rows.append(
+    button('opt', 'auto', t('modeAuto'), t('modeAutoSub')),
+    button('opt', 'cf', 'Cloudflare', t('modeCfSub')),
+    button('opt', 'my', t('modeMy'), t('modeMySub')),
+  );
+
+  // The M-Lab row picks the nearest server; its arrow opens the list of countries.
   const grid = document.createElement('div');
   grid.className = 'chips';
-  MLAB.map(cc => [cc, cc === 'US' ? t('usa') : regionName(cc)])
+  grid.hidden = !mlabOpen;
+  MLAB.map(cc => [cc, countryName(cc)])
     .sort((a, b) => a[1].localeCompare(b[1], lang))
-    .forEach(([cc, name]) => grid.append(button('chip', cc, name)));
-  $('nodeList').replaceChildren(auto, head, grid);
+    .forEach(([cc, name]) => grid.append(button('chip', 'mlab:' + cc, name)));
+  const arrow = document.createElement('button');
+  arrow.type = 'button';
+  arrow.className = 'opt-arrow';
+  arrow.setAttribute('aria-label', t('mlabCountries'));
+  arrow.setAttribute('aria-expanded', mlabOpen);
+  arrow.innerHTML = CHEVRON_SVG;
+  arrow.addEventListener('click', () => {
+    mlabOpen = !mlabOpen;
+    grid.hidden = !mlabOpen;
+    arrow.setAttribute('aria-expanded', mlabOpen);
+  });
+  const mlab = document.createElement('div');
+  mlab.className = 'opt-split';
+  mlab.append(button('opt', 'mlab', 'M-Lab', t('modeMlabSub')), arrow);
+  rows.append(mlab);
+
+  $('nodeList').replaceChildren(rows, grid);
 }
 
 function showNodeStep(consent) {
@@ -642,9 +705,9 @@ function setNode(id) {
 }
 
 function pickNode(id) {
-  if (id !== 'auto' && store.get('mlabConsent') !== '1') {
+  if (id.startsWith('mlab') && store.get('mlabConsent') !== '1') {
     pendingNode = id;
-    $('consentText').textContent = t('consent').replace('{place}', regionName(id));
+    $('consentText').textContent = t('consent').replace('{place}', mlabCc(id) ? countryName(mlabCc(id)) : t('nearest'));
     showNodeStep(true);
     return;
   }
@@ -653,6 +716,7 @@ function pickNode(id) {
 
 $('nodeBtn').addEventListener('click', () => {
   if (engine) return;
+  mlabOpen = !!mlabCc(S.node);
   fillNodes();
   showNodeStep(false);
   $('nodeSheet').showModal();
