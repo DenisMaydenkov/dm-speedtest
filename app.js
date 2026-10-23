@@ -24,11 +24,8 @@ const I18N = {
     fixText: 'Включи защиту от утечки WebRTC в настройках VPN-клиента. Если её нет — запрети WebRTC в браузере или поставь расширение, которое его блокирует.',
     connecting: 'Подключение', server: 'Сервер', usa: 'США', nearest: 'ближайший',
     nodeTitle: 'Сервер замера',
-    modeAuto: 'Авто', modeAutoSub: 'Наш сервер, если ты на VPN DMWorks, иначе Cloudflare',
-    modeCfSub: 'Ближайший узел Cloudflare', modeMy: 'DMWorks NL', modeMySub: 'Наш сервер в Амстердаме',
-    modeMlabSub: 'Ближайший сервер M-Lab', mlabCountries: 'Выбрать страну M-Lab', nodeMy: 'сервер DMWorks NL',
-    footMy: 'Замер идёт до сервера DMWorks в Нидерландах. Не храним IP и результаты.',
-    warnMyVpn: 'Ты подключён к VPN DMWorks, поэтому замер идёт до этого же сервера: он показывает скорость между тобой и VPN. Чтобы проверить интернет за VPN, выбери Cloudflare или M-Lab.',
+    modeCfSub: 'Ближайший узел Cloudflare',
+    modeMlabSub: 'Ближайший сервер M-Lab', mlabCountries: 'Выбрать страну M-Lab',
     mlabNote: 'Серверы M-Lab публикуют результат замера вместе с IP-адресом в открытом наборе данных.',
     mlabPolicy: 'Политика данных M-Lab', agree: 'Согласен', cancel: 'Отмена',
     consent: 'Замер пойдёт до сервера M-Lab ({place}). M-Lab опубликует результат вместе с твоим IP-адресом в открытом наборе данных. Продолжить?',
@@ -56,11 +53,8 @@ const I18N = {
     fixText: 'Turn on WebRTC leak protection in your VPN app. If it has none, disable WebRTC in the browser or install an extension that blocks it.',
     connecting: 'Connecting', server: 'Server', usa: 'USA', nearest: 'nearest',
     nodeTitle: 'Test server',
-    modeAuto: 'Auto', modeAutoSub: 'Our server if you’re on DMWorks VPN, otherwise Cloudflare',
-    modeCfSub: 'Nearest Cloudflare node', modeMy: 'DMWorks NL', modeMySub: 'Our server in Amsterdam',
-    modeMlabSub: 'Nearest M-Lab server', mlabCountries: 'Choose an M-Lab country', nodeMy: 'DMWorks NL server',
-    footMy: 'Measured to the DMWorks server in the Netherlands. We don’t store your IP or results.',
-    warnMyVpn: 'You’re connected to DMWorks VPN, so the test runs to that same server: it shows the speed between you and the VPN. To test the internet behind the VPN, pick Cloudflare or M-Lab.',
+    modeCfSub: 'Nearest Cloudflare node',
+    modeMlabSub: 'Nearest M-Lab server', mlabCountries: 'Choose an M-Lab country',
     mlabNote: 'M-Lab servers publish the result together with your IP address in an open dataset.',
     mlabPolicy: 'M-Lab data policy', agree: 'I agree', cancel: 'Cancel',
     consent: 'The test will run to an M-Lab server ({place}). M-Lab will publish the result together with your IP address in an open dataset. Continue?',
@@ -97,10 +91,7 @@ const BOUNDS = { latency: [0, DL_FROM], download: [DL_FROM, UL_FROM], upload: [U
 const SCALES = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
 // Countries where M-Lab's locate service has ndt7 servers.
 const MLAB = ['NL', 'DE', 'FI', 'SE', 'PL', 'GB', 'FR', 'IT', 'ES', 'US', 'JP', 'SG'];
-// The DMWorks VPN exits from this address; its server also hosts the speed test endpoints.
-const MY_IPS = ['87.199.202.19'];
-const MY_SPEED = 'https://dmworks.duckdns.org/speed';
-const NODES = ['auto', 'cf', 'my', 'mlab', ...MLAB.map(cc => 'mlab:' + cc)];
+const NODES = ['cf', 'mlab', ...MLAB.map(cc => 'mlab:' + cc)];
 const savedNode = (() => { try { return localStorage.getItem('node'); } catch { return null; } })();
 const NDT_SECONDS = 10;
 
@@ -118,7 +109,7 @@ const t = k => I18N[lang][k] ?? k;
 
 const S = {
   phase: 'idle', frac: 0, kind: 'cf',
-  node: NODES.includes(savedNode) ? savedNode : MLAB.includes(savedNode) ? 'mlab:' + savedNode : 'auto',
+  node: NODES.includes(savedNode) ? savedNode : MLAB.includes(savedNode) ? 'mlab:' + savedNode : 'cf',
   mode: 'cf', server: null,
   ping: null, jitter: null, dl: null, ul: null,
   target: 0, shown: 0, scale: 0,
@@ -136,17 +127,13 @@ const scaleFor = v => SCALES.find(s => s >= v * 1.05) || SCALES.at(-1);
 const regionName = cc => { try { return new Intl.DisplayNames([lang], { type: 'region' }).of(cc); } catch { return cc; } };
 const countryName = cc => (cc === 'US' ? t('usa') : regionName(cc));
 const mlabCc = node => (node.startsWith('mlab:') ? node.slice(5) : null);
-const onMyVpn = () => MY_IPS.includes(S.net?.ip);
-// What a choice actually measures against; "auto" resolves once we know whose VPN the visitor is on.
-const modeOf = node => (node === 'auto' ? (onMyVpn() ? 'my' : 'cf') : node.startsWith('mlab') ? 'mlab' : node);
+const modeOf = node => (node.startsWith('mlab') ? 'mlab' : node);
 const curMode = () => (S.phase === 'idle' ? modeOf(S.node) : S.mode);
 const serverPlace = () => S.server?.city || (mlabCc(S.node) ? countryName(mlabCc(S.node)) : t('nearest'));
-const nodeName = node => node === 'auto' ? t('modeAuto') : node === 'cf' ? 'Cloudflare' : node === 'my' ? t('modeMy')
-  : mlabCc(node) ? `M-Lab, ${countryName(mlabCc(node))}` : 'M-Lab';
+const nodeName = node => node === 'cf' ? 'Cloudflare' : mlabCc(node) ? `M-Lab, ${countryName(mlabCc(node))}` : 'M-Lab';
 
 function nodeLabel() {
   const m = curMode();
-  if (m === 'my') return t('nodeMy');
   if (m === 'mlab') return `M-Lab ${serverPlace()}`;
   return S.net?.colo ? `${t('node')} ${S.net.colo}` : 'Cloudflare';
 }
@@ -286,7 +273,7 @@ function start() {
   Object.assign(S, { phase: 'latency', frac: 0, ping: null, jitter: null, dl: null, ul: null, target: 0, shown: 0, scale: 0, card: null });
   S.mode = modeOf(S.node);
   if (S.mode === 'mlab') startMlab(mlabCc(S.node));
-  else startCloudflare(S.mode === 'my' ? { downloadApiUrl: `${MY_SPEED}/__down`, uploadApiUrl: `${MY_SPEED}/__up` } : {});
+  else startCloudflare({});
   render();
   tick();
 }
@@ -523,6 +510,9 @@ function setTile(id, value, unit) {
   }
 }
 
+// Good ping is green, middling yellow, bad red; white until the first measurement.
+const pingColor = ms => ms == null ? '' : ms < 60 ? 'var(--success)' : ms < 150 ? 'var(--create)' : 'var(--danger)';
+
 function renderSteps() {
   const order = ['latency', 'download', 'upload'];
   const cur = order.indexOf(S.phase);
@@ -530,7 +520,9 @@ function renderSteps() {
     const i = order.indexOf(div.dataset.step);
     const frac = S.phase === 'done' || i < cur ? 1 : i > cur ? 0 : S.frac;
     div.classList.toggle('on', i === cur);
-    div.querySelector('i').style.width = (frac * 100).toFixed(1) + '%';
+    const bar = div.querySelector('i');
+    bar.style.width = (frac * 100).toFixed(1) + '%';
+    if (div.dataset.step === 'latency') bar.style.background = pingColor(S.ping);
   });
 }
 
@@ -550,8 +542,7 @@ function renderNet() {
     $('connSub').textContent = [n.ip, n.vpn ? n.org : (n.asn ? 'AS' + n.asn : ''), nodeLabel()].filter(Boolean).join(' · ');
   }
   const m = curMode();
-  const warn = m === 'my' && onMyVpn() ? t('warnMyVpn')
-    : n && n.cc === 'RU' && !n.vpn && m === 'cf' ? t('warnRu') : '';
+  const warn = n && n.cc === 'RU' && !n.vpn && m === 'cf' ? t('warnRu') : '';
   $('warnText').textContent = warn;
   $('warn').hidden = !warn;
 }
@@ -559,15 +550,14 @@ function renderNet() {
 function renderNode() {
   const short = document.createElement('span');
   short.className = 'short';
-  short.textContent = mlabCc(S.node) || { auto: '', cf: 'CF', my: 'NL', mlab: 'M-Lab' }[S.node];
+  short.textContent = mlabCc(S.node) || { cf: 'CF', mlab: 'M-Lab' }[S.node];
   const long = document.createElement('span');
   long.className = 'long';
   long.textContent = `${t('server')}: ${nodeName(S.node)}`;
   $('nodeText').replaceChildren(short, long);
-  $('nodeBtn').classList.toggle('icon-only', S.node === 'auto');
   $('nodeBtn').setAttribute('aria-label', long.textContent);
   const m = curMode();
-  $('foot').textContent = m === 'my' ? t('footMy') : m === 'mlab' ? t('footMlab').replace('{place}', serverPlace()) : t('foot');
+  $('foot').textContent = m === 'mlab' ? t('footMlab').replace('{place}', serverPlace()) : t('foot');
 }
 
 function render() {
@@ -660,9 +650,7 @@ function fillNodes() {
   const rows = document.createElement('div');
   rows.className = 'rows';
   rows.append(
-    button('opt', 'auto', t('modeAuto'), t('modeAutoSub')),
     button('opt', 'cf', 'Cloudflare', t('modeCfSub')),
-    button('opt', 'my', t('modeMy'), t('modeMySub')),
   );
 
   // The M-Lab row picks the nearest server; its arrow opens the list of countries.
