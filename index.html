@@ -9,6 +9,11 @@
 <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Speed test">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -94,6 +99,12 @@
     <div class="row-btns"><button class="main" id="consentYes" type="button" data-t="agree"></button><button class="ghost" id="consentNo" type="button" data-t="cancel"></button></div>
   </div>
 </dialog>
+
+<div class="install" id="install" role="dialog" aria-live="polite" hidden>
+  <p><b data-t="installTitle"></b><span id="installText"></span></p>
+  <button class="go" id="installGo" type="button" data-t="installBtn"></button>
+  <button class="x" id="installX" type="button" aria-label="×">×</button>
+</div>
 
 <div class="toast" id="toast" role="status"></div>
 </body>

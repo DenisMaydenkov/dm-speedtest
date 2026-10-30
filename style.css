@@ -131,6 +131,14 @@ svg{flex:none}
   background:var(--btn);color:var(--btn-text);border-radius:22px;padding:12px 20px;font-size:14px;font-weight:500;transition:.2s;white-space:nowrap}
 .toast.on{opacity:1;transform:translate(-50%,0)}
 
+.install{position:fixed;left:12px;right:12px;bottom:max(12px,env(safe-area-inset-bottom));max-width:420px;margin:0 auto;z-index:20;display:flex;align-items:center;gap:10px;
+  background:var(--bg);border:1px solid var(--sep);border-radius:2px;padding:12px 8px 12px 14px;box-shadow:0 8px 30px rgba(0,0,0,.35)}
+.install[hidden]{display:none}
+.install p{margin:0;flex:1;font-size:13px;line-height:1.4;color:var(--hint)}
+.install b{display:block;font-size:14px;color:var(--text);font-weight:600}
+.install .go{height:38px;border:0;border-radius:19px;padding:0 16px;background:var(--btn);color:var(--btn-text);font-size:14px;font-weight:500;cursor:pointer}
+.install .x{width:32px;height:32px;border:0;background:none;color:var(--hint);font-size:22px;line-height:1;cursor:pointer}
+
 /* desktop: compact horizontal layout */
 @media (min-width:900px){
   .app{min-height:0;max-width:960px;margin:0 auto;padding-top:clamp(24px,8vh,96px);gap:16px}

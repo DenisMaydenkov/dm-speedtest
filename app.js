@@ -30,6 +30,8 @@ const I18N = {
     mlabPolicy: 'Политика данных M-Lab', agree: 'Согласен', cancel: 'Отмена',
     consent: 'Замер пойдёт до сервера M-Lab ({place}). M-Lab опубликует результат вместе с твоим IP-адресом в открытом наборе данных. Продолжить?',
     footMlab: 'Замер идёт до сервера M-Lab ({place}). M-Lab публикует результат и IP.',
+    installTitle: 'Добавить как приложение', installText: 'Откроется на весь экран, без адресной строки.',
+    installIos: 'Нажми «Поделиться», затем «На экран “Домой”».', installBtn: 'Установить',
     rV6: 'IPv6', v6None: 'Не используется', v6Ok: 'Идёт через VPN', v6Leak: 'Утечка: {ip}',
     rTz: 'Часовой пояс', tzOk: 'Совпадает с IP', tzBad: 'Браузер: {a}, IP: {b}',
     rLang: 'Язык', langOk: 'Не выдаёт', langBad: 'Браузер: {l}',
@@ -65,6 +67,8 @@ const I18N = {
     mlabPolicy: 'M-Lab data policy', agree: 'I agree', cancel: 'Cancel',
     consent: 'The test will run to an M-Lab server ({place}). M-Lab will publish the result together with your IP address in an open dataset. Continue?',
     footMlab: 'Measured to the M-Lab server ({place}). M-Lab publishes the result and IP.',
+    installTitle: 'Add as an app', installText: 'Opens full screen, without the address bar.',
+    installIos: 'Tap Share, then “Add to Home Screen”.', installBtn: 'Install',
     rV6: 'IPv6', v6None: 'Not in use', v6Ok: 'Goes through VPN', v6Leak: 'Leak: {ip}',
     rTz: 'Time zone', tzOk: 'Matches the IP', tzBad: 'Browser: {a}, IP: {b}',
     rLang: 'Language', langOk: 'Not a giveaway', langBad: 'Browser: {l}',
@@ -195,6 +199,7 @@ $('langBtn').addEventListener('click', () => {
   loadNet();
   if ($('sheet').open) fillSheet();
   if ($('nodeSheet').open) fillNodes();
+  fillInstall();
 });
 
 /* ---------- network: who sees us, and is it a VPN ---------- */
@@ -854,6 +859,7 @@ function cardData() {
 
 // Drawn ahead of time so the tap goes straight to the share sheet, which browsers only open right after a gesture.
 function prepareCard() {
+  maybeInstall();
   const p = drawCard(cardData());
   S.card = { blob: p, file: null };
   p.then(b => { if (S.card?.blob === p) S.card.file = new File([b], 'speedtest-dmworks.png', { type: 'image/png' }); });
@@ -894,6 +900,37 @@ function toast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('on'), 2400);
 }
+
+/* ---------- install as an app ---------- */
+
+let installEvt = null;
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+function fillInstall() {
+  $('installText').textContent = installEvt ? t('installText') : t('installIos');
+  $('installGo').hidden = !installEvt;
+}
+// Offered after a finished test, unless the app is already installed or was dismissed in the last 7 days.
+function maybeInstall() {
+  const asked = Number(store.get('installAsked')) || 0;
+  if (standalone() || store.get('installed') === '1' || Date.now() - asked < 7 * 864e5) return;
+  if (!installEvt && !isIos()) return;
+  fillInstall();
+  $('install').hidden = false;
+}
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; if (S.phase === 'done') maybeInstall(); });
+addEventListener('appinstalled', () => { store.set('installed', '1'); installEvt = null; $('install').hidden = true; });
+$('installGo').addEventListener('click', async () => {
+  if (!installEvt) return;
+  installEvt.prompt();
+  const { outcome } = await installEvt.userChoice;
+  installEvt = null;
+  store.set(outcome === 'accepted' ? 'installed' : 'installAsked', outcome === 'accepted' ? '1' : String(Date.now()));
+  $('install').hidden = true;
+});
+$('installX').addEventListener('click', () => { store.set('installAsked', String(Date.now())); $('install').hidden = true; });
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
 applyLang();
 loadNet();
