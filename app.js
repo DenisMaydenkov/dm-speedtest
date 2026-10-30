@@ -30,6 +30,9 @@ const I18N = {
     mlabPolicy: 'Политика данных M-Lab', agree: 'Согласен', cancel: 'Отмена',
     consent: 'Замер пойдёт до сервера M-Lab ({place}). M-Lab опубликует результат вместе с твоим IP-адресом в открытом наборе данных. Продолжить?',
     footMlab: 'Замер идёт до сервера M-Lab ({place}). M-Lab публикует результат и IP.',
+    rV6: 'IPv6', v6None: 'Не используется', v6Ok: 'Идёт через VPN', v6Leak: 'Утечка: {ip}',
+    rTz: 'Часовой пояс', tzOk: 'Совпадает с IP', tzBad: 'Браузер: {a}, IP: {b}',
+    rLang: 'Язык', langOk: 'Не выдаёт', langBad: 'Браузер: {l}',
   },
   en: {
     start: 'Start test', stop: 'Stop', again: 'Run again', share: 'Share', ok: 'Got it',
@@ -59,6 +62,9 @@ const I18N = {
     mlabPolicy: 'M-Lab data policy', agree: 'I agree', cancel: 'Cancel',
     consent: 'The test will run to an M-Lab server ({place}). M-Lab will publish the result together with your IP address in an open dataset. Continue?',
     footMlab: 'Measured to the M-Lab server ({place}). M-Lab publishes the result and IP.',
+    rV6: 'IPv6', v6None: 'Not in use', v6Ok: 'Goes through VPN', v6Leak: 'Leak: {ip}',
+    rTz: 'Time zone', tzOk: 'Matches the IP', tzBad: 'Browser: {a}, IP: {b}',
+    rLang: 'Language', langOk: 'Not a giveaway', langBad: 'Browser: {l}',
   },
 };
 
@@ -113,7 +119,7 @@ const S = {
   mode: 'cf', server: null,
   ping: null, jitter: null, dl: null, ul: null,
   target: 0, shown: 0, scale: 0,
-  net: null, netFailed: false, rtc: null,
+  net: null, netFailed: false, rtc: null, chk: null,
   card: null,
 };
 let engine = null;
@@ -210,13 +216,14 @@ async function loadNet() {
   };
   S.net = {
     ip: w?.ip || tr.ip, country: w?.country || tr.loc || '', cc: w?.country_code || tr.loc || '', city: w?.city || '',
-    asn: conn.asn || '', org, colo: tr.colo || '',
+    asn: conn.asn || '', org, colo: tr.colo || '', tz: w?.timezone?.id || '', tzOffset: ipOffset,
     vpn: reasons.warp || reasons.hosting || reasons.timezone,
   };
   S.netFailed = false;
   S.card = null;
   render();
   if (S.rtc === null) checkRtc();
+  runChecks();
 }
 
 function isPublicIp(ip) {
@@ -226,10 +233,47 @@ function isPublicIp(ip) {
     (a === 172 && b >= 16 && b <= 31) || (a === 100 && b >= 64 && b <= 127));
 }
 
+const geoOf = async ip => {
+  try {
+    const w = await fetch(`https://ipwho.is/${ip}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json());
+    return w.success ? { asn: w.connection?.asn, cc: w.country_code } : null;
+  } catch { return null; }
+};
+// An address is a leak only if it belongs to a different network than the one sites see (WARP and others use sibling IPs).
+async function isLeak(ip) {
+  const me = (S.net?.ip || '').toLowerCase();
+  if (ip === me) return false;
+  const g = await geoOf(ip);
+  return g && S.net?.asn ? g.asn !== S.net.asn : true;
+}
+const realLeaks = async ips => { const f = await Promise.all(ips.map(isLeak)); return ips.filter((_, i) => f[i]); };
+
+// Extra privacy checks: IPv6 path, time zone and language versus the IP's country.
+async function runChecks() {
+  const n = S.net;
+  if (!n) return;
+  const chk = { v6: 'none', v6ip: '', tz: null, lang: null };
+  try {
+    const ip = (await fetch('https://api64.ipify.org?format=json', { signal: AbortSignal.timeout(4000) }).then(r => r.json())).ip || '';
+    if (ip.includes(':')) {
+      chk.v6ip = ip;
+      chk.v6 = ip.toLowerCase() === n.ip.toLowerCase() || !(await isLeak(ip.toLowerCase())) ? 'ok' : 'leak';
+    }
+  } catch {}
+  const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  const off = -new Date().getTimezoneOffset() / 60;
+  chk.tz = n.tzOffset == null ? null : { bad: n.tzOffset !== off, a: browserTz, b: n.tz };
+  const ruLike = (navigator.languages || [navigator.language]).filter(x => /^(ru|uk|be|kk)\b/i.test(x));
+  chk.lang = { bad: ruLike.length > 0 && !['RU', 'UA', 'BY', 'KZ'].includes(n.cc), l: ruLike[0] || '' };
+  S.chk = chk;
+  render();
+  if ($('sheet').open) fillSheet();
+}
+
 // Asks STUN servers which address they see; a browser that bypasses the VPN here reveals the real IP.
 async function checkRtc() {
   S.rtc = 'pending';
-  if (!window.RTCPeerConnection) { S.rtc = { ips: [], off: true }; render(); return; }
+  if (!window.RTCPeerConnection) { S.rtc = { ips: [], leaks: [], off: true }; render(); return; }
   const ips = new Set();
   let pc;
   try {
@@ -244,9 +288,10 @@ async function checkRtc() {
       setTimeout(done, 3000);
       pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') done(); };
     });
-    S.rtc = { ips: [...ips] };
+    const list = [...ips];
+    S.rtc = { ips: list, leaks: await realLeaks(list) };
   } catch {
-    S.rtc = { ips: [], off: true };
+    S.rtc = { ips: [], leaks: [], off: true };
   } finally {
     pc?.close();
   }
@@ -259,10 +304,9 @@ function verdict() {
   if (!n) return S.netFailed ? 'fail' : 'wait';
   if (!n.vpn) return 'novpn';
   if (S.rtc === null || S.rtc === 'pending') return 'wait';
-  const me = (n.ip || '').toLowerCase();
-  return S.rtc.ips.some(ip => ip !== me) ? 'leak' : 'clean';
+  return S.rtc.leaks.length || S.chk?.v6 === 'leak' ? 'leak' : 'clean';
 }
-const leakedIps = () => (S.rtc?.ips || []).filter(ip => ip !== (S.net?.ip || '').toLowerCase());
+const leakedIps = () => [...(S.rtc?.leaks || []), ...(S.chk?.v6 === 'leak' ? [S.chk.v6ip] : [])];
 
 /* ---------- speed test ---------- */
 
@@ -610,6 +654,12 @@ function fillSheet() {
     else if (v === 'leak') add(t('rRtc'), leakedIps().join(', '), 'bad');
     else if (v === 'clean') add(t('rRtc'), S.rtc.off ? t('rtcOff') : t('rtcOk'), 'ok');
     else add(t('rRtc'), t('checking'));
+    const c = S.chk;
+    if (n.vpn && c) {
+      add(t('rV6'), c.v6 === 'none' ? t('v6None') : c.v6 === 'ok' ? t('v6Ok') : t('v6Leak').replace('{ip}', c.v6ip), c.v6 === 'leak' ? 'bad' : 'ok');
+      if (c.tz) add(t('rTz'), c.tz.bad ? t('tzBad').replace('{a}', c.tz.a).replace('{b}', c.tz.b) : t('tzOk'), c.tz.bad ? 'bad' : 'ok');
+      add(t('rLang'), c.lang.bad ? t('langBad').replace('{l}', c.lang.l) : t('langOk'), c.lang.bad ? 'bad' : 'ok');
+    }
   }
   rows.hidden = !n;
 }
