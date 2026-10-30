@@ -33,6 +33,9 @@ const I18N = {
     rV6: 'IPv6', v6None: 'Не используется', v6Ok: 'Идёт через VPN', v6Leak: 'Утечка: {ip}',
     rTz: 'Часовой пояс', tzOk: 'Совпадает с IP', tzBad: 'Браузер: {a}, IP: {b}',
     rLang: 'Язык', langOk: 'Не выдаёт', langBad: 'Браузер: {l}',
+    rDns: 'DNS', dnsOk: 'Через VPN ({n})', dnsLeak: 'Утечка: {s}', dnsNa: 'Не удалось проверить',
+    rLoc: 'Локаль', locOk: 'Не выдаёт', locBad: 'Браузер: {l}', rFp: 'Отпечаток', fpRand: 'рандомизируется', fpVm: 'виртуальная среда',
+    rIpType: 'Тип IP', ipHome: 'Похож на домашний', ipDc: 'Датацентр или VPN', rScore: 'Итог', score: '{a} из {b} проверок',
   },
   en: {
     start: 'Start test', stop: 'Stop', again: 'Run again', share: 'Share', ok: 'Got it',
@@ -65,6 +68,9 @@ const I18N = {
     rV6: 'IPv6', v6None: 'Not in use', v6Ok: 'Goes through VPN', v6Leak: 'Leak: {ip}',
     rTz: 'Time zone', tzOk: 'Matches the IP', tzBad: 'Browser: {a}, IP: {b}',
     rLang: 'Language', langOk: 'Not a giveaway', langBad: 'Browser: {l}',
+    rDns: 'DNS', dnsOk: 'Through VPN ({n})', dnsLeak: 'Leak: {s}', dnsNa: 'Could not check',
+    rLoc: 'Locale', locOk: 'Not a giveaway', locBad: 'Browser: {l}', rFp: 'Fingerprint', fpRand: 'randomized', fpVm: 'virtual environment',
+    rIpType: 'IP type', ipHome: 'Looks residential', ipDc: 'Datacenter or VPN', rScore: 'Result', score: '{a} of {b} checks',
   },
 };
 
@@ -216,7 +222,7 @@ async function loadNet() {
   };
   S.net = {
     ip: w?.ip || tr.ip, country: w?.country || tr.loc || '', cc: w?.country_code || tr.loc || '', city: w?.city || '',
-    asn: conn.asn || '', org, colo: tr.colo || '', tz: w?.timezone?.id || '', tzOffset: ipOffset,
+    asn: conn.asn || '', org, colo: tr.colo || '', tz: w?.timezone?.id || '', tzOffset: ipOffset, dc: reasons.warp || reasons.hosting,
     vpn: reasons.warp || reasons.hosting || reasons.timezone,
   };
   S.netFailed = false;
@@ -248,11 +254,59 @@ async function isLeak(ip) {
 }
 const realLeaks = async ips => { const f = await Promise.all(ips.map(isLeak)); return ips.filter((_, i) => f[i]); };
 
+const EAST = ['RU', 'UA', 'BY', 'KZ'];
+function fingerprint() {
+  const out = { hash: '', gpu: '', rand: false, vm: false };
+  try {
+    const draw = () => {
+      const c = document.createElement('canvas'); c.width = 220; c.height = 40;
+      const x = c.getContext('2d'); x.font = '16px Arial'; x.fillStyle = '#f60'; x.fillRect(10, 5, 90, 25);
+      x.fillStyle = '#069'; x.fillText('dm-speedtest ✓ 1.0', 12, 24);
+      return c.toDataURL();
+    };
+    const a = draw(), b = draw();
+    out.rand = a !== b;
+    let h = 0; for (const ch of a) h = (h * 31 + ch.charCodeAt(0)) | 0;
+    out.hash = (h >>> 0).toString(16).padStart(8, '0').slice(0, 6);
+  } catch {}
+  try {
+    const gl = document.createElement('canvas').getContext('webgl');
+    const ext = gl?.getExtension('WEBGL_debug_renderer_info');
+    out.gpu = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+    out.vm = /swiftshader|llvmpipe|vmware|virtualbox|parallels/i.test(out.gpu);
+  } catch {}
+  return out;
+}
+
+// DNS leak test through bash.ws: our resolver shows up when we look up unique subdomains.
+async function runDns() {
+  let dns = null;
+  try {
+    const id = 1000000 + Math.floor(Math.random() * 9000000);
+    await Promise.allSettled([...Array(10).keys()].map(i =>
+      fetch(`https://${i + 1}.${id}.bash.ws`, { mode: 'no-cors', cache: 'no-store', signal: AbortSignal.timeout(6000) })));
+    const res = await fetch(`https://bash.ws/dnsleak/test/${id}?json`, { signal: AbortSignal.timeout(8000) }).then(r => r.json());
+    const list = res.filter(x => x.type === 'dns');
+    if (list.length) {
+      const bad = list.filter(x => EAST.includes(String(x.country || '').toUpperCase()) && !EAST.includes(S.net?.cc));
+      dns = { ok: !bad.length, n: list.length, bad: bad.slice(0, 2).map(x => `${x.ip} ${x.asn || ''}`.trim()).join(', ') };
+    }
+  } catch {}
+  if (S.chk) { S.chk.dns = dns; render(); if ($('sheet').open) fillSheet(); }
+}
+
+function score() {
+  const c = S.chk;
+  if (!S.net?.vpn || !c || !S.rtc || S.rtc === 'pending') return null;
+  const known = [S.rtc.leaks.length === 0, c.v6 !== 'leak', c.tz ? !c.tz.bad : null, !c.lang.bad, !c.loc.bad, c.dns ? c.dns.ok : null].filter(x => x !== null);
+  return { a: known.filter(Boolean).length, b: known.length };
+}
+
 // Extra privacy checks: IPv6 path, time zone and language versus the IP's country.
 async function runChecks() {
   const n = S.net;
   if (!n) return;
-  const chk = { v6: 'none', v6ip: '', tz: null, lang: null };
+  const chk = { v6: 'none', v6ip: '', tz: null, lang: null, loc: null, fp: null, dns: S.chk?.dns };
   try {
     const ip = (await fetch('https://api64.ipify.org?format=json', { signal: AbortSignal.timeout(4000) }).then(r => r.json())).ip || '';
     if (ip.includes(':')) {
@@ -261,11 +315,15 @@ async function runChecks() {
     }
   } catch {}
   const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-  const off = -new Date().getTimezoneOffset() / 60;
+  const off = -new Date().getTimezoneOffset(); // minutes, same unit as tzOffset
   chk.tz = n.tzOffset == null ? null : { bad: n.tzOffset !== off, a: browserTz, b: n.tz };
   const ruLike = (navigator.languages || [navigator.language]).filter(x => /^(ru|uk|be|kk)\b/i.test(x));
-  chk.lang = { bad: ruLike.length > 0 && !['RU', 'UA', 'BY', 'KZ'].includes(n.cc), l: ruLike[0] || '' };
+  chk.lang = { bad: ruLike.length > 0 && !EAST.includes(n.cc), l: ruLike[0] || '' };
+  const loc = Intl.DateTimeFormat().resolvedOptions().locale || navigator.language || '';
+  chk.loc = { bad: /^(ru|uk|be|kk)\b/i.test(loc) && !EAST.includes(n.cc), l: loc };
+  chk.fp = fingerprint();
   S.chk = chk;
+  if (chk.dns === undefined) runDns();
   render();
   if ($('sheet').open) fillSheet();
 }
@@ -659,6 +717,13 @@ function fillSheet() {
       add(t('rV6'), c.v6 === 'none' ? t('v6None') : c.v6 === 'ok' ? t('v6Ok') : t('v6Leak').replace('{ip}', c.v6ip), c.v6 === 'leak' ? 'bad' : 'ok');
       if (c.tz) add(t('rTz'), c.tz.bad ? t('tzBad').replace('{a}', c.tz.a).replace('{b}', c.tz.b) : t('tzOk'), c.tz.bad ? 'bad' : 'ok');
       add(t('rLang'), c.lang.bad ? t('langBad').replace('{l}', c.lang.l) : t('langOk'), c.lang.bad ? 'bad' : 'ok');
+      add(t('rLoc'), c.loc.bad ? t('locBad').replace('{l}', c.loc.l) : t('locOk'), c.loc.bad ? 'bad' : 'ok');
+      add(t('rDns'), c.dns === undefined ? t('checking') : !c.dns ? t('dnsNa') : c.dns.ok ? t('dnsOk').replace('{n}', c.dns.n) : t('dnsLeak').replace('{s}', c.dns.bad), c.dns ? (c.dns.ok ? 'ok' : 'bad') : '');
+      add(t('rIpType'), n.dc ? t('ipDc') : t('ipHome'));
+      const f = c.fp;
+      add(t('rFp'), [f.hash, f.rand ? t('fpRand') : '', f.vm ? t('fpVm') : ''].filter(Boolean).join(' · ') || '—', f.vm ? 'bad' : '');
+      const sc = score();
+      if (sc) { add(t('rScore'), t('score').replace('{a}', sc.a).replace('{b}', sc.b), sc.a === sc.b ? 'ok' : 'bad'); rows.prepend(rows.lastChild); }
     }
   }
   rows.hidden = !n;
